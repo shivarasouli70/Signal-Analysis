@@ -1,0 +1,751 @@
+---
+title: "IMSE548_HW1_EMG"
+author: "Shiva Rasouli"
+date: "2024-02-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE)
+```
+# Load libraries
+```{r}
+library(signal)
+library(readr)
+library(tidyverse)
+```
+
+# Read data
+```{r}
+data1 <- read_csv("../Hand sEMG dataset/1_raw.csv")
+
+
+# Renaming columns for each dataset
+colnames(data1) <- c("ch1", "ch2", "ch3", "ch4")
+
+```
+
+
+#EMG Plots for Participant1
+```{r}
+#sampling frequency
+fs<-2000
+time <- seq(from = 0, by = 1/fs, length.out = nrow(data1))
+data1$time<-time
+
+# Load the necessary libraries
+library(tidyverse)
+
+# Convert data from wide to long format
+data_long <- data1 %>%
+  pivot_longer(
+    cols = starts_with("ch"),  
+    names_to = "Channel",  
+    values_to = "Signal"  
+  )
+data_long$Channel <- factor(data_long$Channel,
+                            labels = c("Channel 1", "Channel 2", "Channel 3", "Channel 4"))
+# Plot the data with ggplot2
+raw_data <- ggplot(data_long, aes(x = time, y = Signal)) +
+  geom_line(color="skyblue") + 
+  facet_wrap(~Channel, scales = "free_y", ncol = 1) +
+  theme_minimal() + # Use a minimal theme
+  labs(title = " ", # Overall plot title
+  x = "Time (s)", y = "EMG (mV)") + 
+  theme(plot.title = element_text(hjust = 0.5), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), # Add grid lines
+        panel.grid.minor = element_line(color = "white")) +
+  geom_hline(yintercept = 0, linetype = "dashed") 
+
+# Print the plot
+print(raw_data)
+
+
+
+ggsave("../plot/raw_plot.png", plot = raw_data, dpi = 300, width = 8, height = 6)
+
+```
+
+# FFT- to find cutoff frequencies
+# NOTE: this section takes a long time to run
+```{r}
+# Calculate FFT
+fft_data <- fft(data1[, 1:4] <- sapply(data1[, 1:4], as.numeric)) # Applying FFT to the first four columns excluding time
+
+# Calculate Magnitude Spectrum
+mag_spectrum <- Mod(fft_data)
+
+# Frequency Vector
+L <- nrow(data1) # Data length
+fs <- 2000 # Sampling frequency
+f <- seq(0, fs/2, length.out = length(mag_spectrum)/2) # Frequency vector for the first half
+
+
+```
+# Plot FFT
+```{r}
+# Plot without default y-axis, adjusting axis title sizes with cex.lab
+plot(f, mag_spectrum[1:length(f)]/1e+06, type = 'l',  # Scale down the magnitude by 1e+06
+     xlab = "Frequency (Hz)",
+     ylab = expression(Magnitude ~ (10^6)),  # Use expression to format ylab
+     main = "", col = "black", yaxt = "n",
+     cex.lab = 0.8)  # Decrease the size of axis titles
+
+# Add a custom y-axis with adjusted labels
+axis(side = 2, at = seq(0, max(mag_spectrum)/1e+06, by = 2),  # Adjust 'by' as needed
+     labels = seq(0, max(mag_spectrum)/1e+06, by = 2))
+
+# Enhancing the plot with grid
+grid()
+
+
+```
+
+
+# Band-pass filter
+```{r}
+#Lowe and upper end cutoff
+lower_cutoff<-10
+upper_cutoff<-500
+
+#Filte order
+order<-4  
+
+# Normalize frequencies by Nyquist frequency
+Wn <- c(lower_cutoff, upper_cutoff) / (fs / 2) 
+
+# Design band-pass filter
+filter_coefs <- butter(order, Wn, type = 'pass') 
+
+#Apply the filter
+
+filtered_data <- apply(data1, 2, function(channel_data) {
+  filtfilt(filter_coefs, channel_data)
+})
+
+
+
+```
+
+#Ploting data after Band Pass filtering 
+```{r}
+# Convert 'filtered_data' to a data frame
+filtered_df <- as.data.frame(filtered_data)
+
+filtered_df$time <- data1$time
+filtered_df <- filtered_df %>%
+  pivot_longer(
+    cols = starts_with("ch"),  
+    names_to = "Channel",  
+    values_to = "Signal"  
+  )
+filtered_df$Channel <- factor(filtered_df$Channel,
+                            labels = c("Channel 1", "Channel 2", "Channel 3", "Channel 4"))
+# Plot the data with ggplot2
+bp <- ggplot(filtered_df, aes(x = time, y = Signal)) +
+  geom_line(color="skyblue") + 
+  facet_wrap(~Channel, scales = "free_y", ncol = 1) +
+  theme_minimal() + 
+  labs(title = " ", 
+  x = "Time (s)", y = "EMG (mV)") + 
+  theme(plot.title = element_text(hjust = 0.5), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white")) +
+  geom_hline(yintercept = 0, linetype = "dashed") 
+
+# Print the plot
+print(bp)
+
+
+ggsave("../plot/filtered_plot.png", plot = bp, dpi = 300, width = 8, height = 6)
+```
+
+
+# Signal Processing: Full-wave rectification
+```{r}
+rectified_signal <- abs(filtered_data)
+```
+
+# Ploting signal after band-pass filtering and rectification
+```{r}
+library(ggplot2)
+library(tidyr) # For pivot_longer()
+# Convert MVC_Normalized to a dataframe
+rectified_signal <- as.data.frame(rectified_signal)
+
+# Convert the dataset to a long format
+rectified_signal$time <- time
+
+# Ensure tidyverse (or at least tidyr) is loaded
+library(tidyverse)
+
+# Pivot to long format
+rectified_long <- rectified_signal %>% 
+  pivot_longer(
+    cols = -time,  
+    names_to = "Channel",  
+    values_to = "Signal"  
+  )
+# Update Channel to be a factor with levels like "Channel 1", "Channel 2", etc.
+rectified_long$Channel <- factor(rectified_long$Channel,
+                            labels = c("Channel 1", "Channel 2", "Channel 3", "Channel 4"))
+
+# Plotting with faceting and custom channel labels
+p <- ggplot(rectified_long, aes(x = time, y = Signal)) +
+  geom_line(color="skyblue") + 
+  theme_minimal() + 
+  labs(title = "", 
+  x = "Time (s)", y = "EMG (mV)") + 
+  facet_wrap(~ Channel, ncol = 1, scales = "free_y") + 
+  theme(plot.title = element_text(hjust = 0.5), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), 
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white")) +
+  geom_hline(yintercept = 0, linetype = "dashed") 
+
+print(p)
+ggsave("../plot/rectified_plot.png", plot = p, dpi = 300, width = 8, height = 6)
+
+
+```
+#RMS envelope
+```{r}
+RMS <- matrix(0, nrow(data1), 4)  
+window <- 100  # Window size
+
+# Load necessary library
+library(zoo)
+
+for (i in 1:4) {
+   RMS[, i] <- sqrt(rollapply(rectified_signal[, i]^2, window, mean, fill = NA, align = 'right'))
+}
+
+max_rms_values <- apply(RMS, MARGIN = 2, max, na.rm = TRUE)
+
+print(round(max_rms_values,3))
+```
+#Plot RMS
+```{r}
+RMS <- as.data.frame(RMS)
+
+RMS$time <- time
+
+
+# Pivot to long format
+RMS_long <- RMS %>% 
+  pivot_longer(
+    cols = -time,  
+    names_to = "Channel",  
+    values_to = "Signal"  
+  )
+# Update Channel to be a factor with levels like "Channel 1", "Channel 2", "Channel 3", "Channel 4"
+RMS_long$Channel <- factor(RMS_long$Channel,
+                            labels = c("Channel 1", "Channel 2", "Channel 3", "Channel 4"))
+
+# Plotting with faceting and custom channel labels
+p <- ggplot(RMS_long, aes(x = time, y = Signal)) +
+  geom_line(color="skyblue") + # Add lines
+  theme_minimal() + # Use a minimal theme
+  labs(title = "RMS EMG over Time", # Overall plot title
+  x = "Time (s)", y = "EMG RMS (mV)") + # Add labels
+  facet_wrap(~ Channel, ncol = 1, scales = "free_y") + 
+  theme(plot.title = element_text(hjust = 0.5), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), 
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white")) +
+  geom_hline(yintercept = 0, linetype = "dashed") 
+
+print(p)
+ggsave("../plot/RMS_plot.png", plot = p, dpi = 300, width = 8, height = 6)
+
+```
+
+
+
+# Normalization (comparing with MVC)
+
+```{r}
+MVC <- c(1.757 ,0.931, 1.501 ,0.168)
+
+MVC_Normalized <- matrix(NA, nrow = nrow(RMS), ncol = 4)
+
+for (i in 1:4) {
+  MVC_Normalized[, i] <- (RMS[, i] / MVC[i])
+}
+
+# Convert MVC_Normalized to a dataframe
+MVC_Normalized <- as.data.frame(MVC_Normalized)
+
+# Now add the 'time' column to the dataframe
+MVC_Normalized$time <- time
+
+
+# Pivot to long format
+MVC_Normalized_long <- MVC_Normalized %>% 
+  pivot_longer(
+    cols = -time,  
+    names_to = "Channel",  
+    values_to = "Signal"  
+  )
+# Update Channel to be a factor with levels like "Channel 1", "Channel 2", etc.
+MVC_Normalized_long$Channel <- factor(MVC_Normalized_long$Channel,
+                            labels = c("Channel 1", "Channel 2", "Channel 3", "Channel 4"))
+
+```
+
+#Plotting normalized envelope against rectified signal
+
+```{r}
+library(dplyr)
+
+# Convert the Time column to numeric
+rectified_long$time <- as.numeric(as.character(rectified_long$time))
+MVC_Normalized_long$time <- as.numeric(as.character(MVC_Normalized_long$time))
+ 
+# Ensure that the Channel names are consistent between the two data frames
+rectified_long$Channel <- as.character(rectified_long$Channel)
+MVC_Normalized_long$Channel <- as.character(MVC_Normalized_long$Channel)
+ 
+# Merge the data on Time and Muscle
+combined_data <- full_join(rectified_long, MVC_Normalized_long, by = c("time", "Channel"))
+combined_data <- combined_data %>%
+  filter(time >= 0 & time <= 104)
+# Now plot the data with 4 subplots for the non-percent data only
+final_plot <- ggplot(combined_data, aes(x = time)) +
+  geom_line(aes(y = Signal.x, colour = "R")) +
+  geom_line(aes(y = Signal.y, colour = "N"), size=0.01) +
+  facet_wrap(~Channel, scales = "free_y", ncol = 1) +
+  theme_minimal()+
+  scale_colour_manual(values = c("R" = "skyblue", "N" = "red"), name = NULL) +
+  labs(title = "",
+       x = "Time",
+       y = "EMG (mV)") +
+  
+  theme_minimal() +
+   theme(plot.title = element_text(hjust = 0.5), # Center the plot title
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), 
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white")) +
+  geom_hline(yintercept = 0, linetype = "dashed") 
+
+# Print the final plot
+print(final_plot)
+ggsave("../plot/two_plot.png", plot = final_plot, dpi = 300, width = 8, height = 6)
+
+```
+
+#Statistcal analysis: Compute the mean and median frequency
+```{r}
+
+
+
+colnames(MVC_Normalized) <- c("Channel1", "Channel2", "Channel3", "Channel4")
+colnames(MVC_Normalized)[5] <- "time"
+
+library(dplyr)
+
+# Function to calculate mean and median for every 2000 rows for a given channel
+calculate_stats <- function(data, channel_name) {
+  data %>%
+    mutate(row_group = ceiling(row_number() / 2000)) %>%
+    group_by(row_group) %>%
+    summarise(mean = mean(!!sym(channel_name), na.rm = TRUE),
+              median = median(!!sym(channel_name), na.rm = TRUE)) %>%
+    select(-row_group)
+}
+
+# Apply the function to each channel
+stats_channel1 <- calculate_stats(MVC_Normalized, "Channel1")
+stats_channel2 <- calculate_stats(MVC_Normalized, "Channel2")
+stats_channel3 <- calculate_stats(MVC_Normalized, "Channel3")
+stats_channel4 <- calculate_stats(MVC_Normalized, "Channel4")
+
+# Combine the results into a new dataframe
+mnf_mdf <- data.frame(Channel1_Mean = stats_channel1$mean,
+                      Channel1_Median = stats_channel1$median,
+                      Channel2_Mean = stats_channel2$mean,
+                      Channel2_Median = stats_channel2$median,
+                      Channel3_Mean = stats_channel3$mean,
+                      Channel3_Median = stats_channel3$median,
+                      Channel4_Mean = stats_channel4$mean,
+                      Channel4_Median = stats_channel4$median)
+
+
+# Calculate the total number of entries required for the 'time' sequence
+total_segments <- nrow(mnf_mdf)
+
+# Create a time sequence from 1 to 640, repeating it enough times to cover all segments
+time_sequence <- rep(1:640, length.out = total_segments)
+
+# Add the time sequence to the mnf_mdf dataframe
+mnf_mdf$time <- time_sequence
+
+
+
+```
+
+#Plot mnf, and mdf for channel 1 for extention gesture
+```{r}
+library(ggplot2)
+
+# Filter the first 60 rows for plotting
+mnf_mdf_subset <- mnf_mdf[11:24, ]
+
+# Create the plot
+mnf<-ggplot(mnf_mdf_subset, aes(x = time)) + 
+  geom_line(aes(y = Channel1_Mean, color = "Mean")) + 
+  geom_line(aes(y = Channel1_Median, color = "Median")) +
+  scale_color_manual(values = c("Mean" = "blue", "Median" = "red"), name=NULL) +
+  labs(title = "",  #Channel 1 Mean and Median over Time for Participant1
+       x = "Time (s)",
+       y = "Value",
+       color = "Legend") +
+  theme_minimal()+
+theme(plot.title = element_text(hjust = 0.5), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10),
+        axis.title.y = element_text(size = 10), 
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white"))
+
+
+ggsave("../plot/mnf_1_1.png", plot = mnf, dpi = 300, width = 8, height = 6)
+
+
+```
+#Plot mnf, and mdf for channel 3 for extention gesture
+```{r}
+library(ggplot2)
+
+# Filter the first 60 rows for plotting
+mnf_mdf_subset <- mnf_mdf[11:24, ]
+
+# Create the plot
+mnf<-ggplot(mnf_mdf_subset, aes(x = time)) + 
+  geom_line(aes(y = Channel3_Mean, color = "Mean")) + 
+  geom_line(aes(y = Channel3_Median, color = "Median")) +
+  scale_color_manual(values = c("Mean" = "blue", "Median" = "red"), name=NULL) +
+  labs(title = "", 
+       x = "Time (s)",
+       y = "Value",
+       color = "Legend") +
+  theme_minimal()+
+theme(plot.title = element_text(hjust = 0.5), # Center the plot title
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), # Smaller x-axis title
+        axis.title.y = element_text(size = 10), # Smaller y-axis title
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white"))
+
+
+ggsave("../plot/mnf_3_1.png", plot = mnf, dpi = 300, width = 8, height = 6)
+
+```
+#Plot mnf, and mdf for channel 2 for Flexion gesture
+```{r}
+library(ggplot2)
+
+# Filter the first 60 rows for plotting
+mnf_mdf_subset <- mnf_mdf[21:34, ]
+
+# Create the plot
+mnf<-ggplot(mnf_mdf_subset, aes(x = time)) + 
+  geom_line(aes(y = Channel2_Mean, color = "Mean")) + 
+  geom_line(aes(y = Channel2_Median, color = "Median")) +
+  scale_color_manual(values = c("Mean" = "blue", "Median" = "red"), name=NULL) +
+  labs(title = "",  
+       x = "Time (s)",
+       y = "Value",
+       color = "Legend") +
+  theme_minimal()+
+theme(plot.title = element_text(hjust = 0.5), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), 
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white"))
+
+
+ggsave("../plot/mnf_2_2.png", plot = mnf, dpi = 300, width = 8, height = 6)
+
+
+```
+#Plot mnf, and mdf for channel 4 for Flexion gesture
+```{r}
+library(ggplot2)
+
+# Filter the first 60 rows for plotting
+mnf_mdf_subset <- mnf_mdf[21:34, ]
+
+# Create the plot
+mnf<-ggplot(mnf_mdf_subset, aes(x = time)) + 
+  geom_line(aes(y = Channel4_Mean, color = "Mean")) + 
+  geom_line(aes(y = Channel4_Median, color = "Median")) +
+  scale_color_manual(values = c("Mean" = "blue", "Median" = "red"), name=NULL) +
+  labs(title = "",  
+       x = "Time (s)",
+       y = "Value",
+       color = "Legend") +
+  theme_minimal()+
+theme(plot.title = element_text(hjust = 0.5), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), 
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white"))
+
+
+ggsave("../plot/mnf_4_2.png", plot = mnf, dpi = 300, width = 8, height = 6)
+
+```
+#Plot mnf, and mdf for channel 2 for Ulnar Deviation gesture
+```{r}
+library(ggplot2)
+
+# Filter the first 60 rows for plotting
+mnf_mdf_subset <- mnf_mdf[31:44, ]
+
+# Create the plot
+mnf<-ggplot(mnf_mdf_subset, aes(x = time)) + 
+  geom_line(aes(y = Channel2_Mean, color = "Mean")) + 
+  geom_line(aes(y = Channel2_Median, color = "Median")) +
+  scale_color_manual(values = c("Mean" = "blue", "Median" = "red"), name=NULL) +
+  labs(title = "",  
+       x = "Time (s)",
+       y = "Value",
+       color = "Legend") +
+  theme_minimal()+
+theme(plot.title = element_text(hjust = 0.5), # Center the plot title
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), 
+        panel.grid.major = element_line(color = "lightgrey"),
+        panel.grid.minor = element_line(color = "white"))
+
+
+ggsave("../plot/mnf_2_3.png", plot = mnf, dpi = 300, width = 8, height = 6)
+
+
+```
+#Plot mnf, and mdf for channel 1for Ulnar Deviation gesture
+```{r}
+library(ggplot2)
+
+# Filter the first 60 rows for plotting
+mnf_mdf_subset <- mnf_mdf[31:44, ]
+
+# Create the plot
+mnf<-ggplot(mnf_mdf_subset, aes(x = time)) + 
+  geom_line(aes(y = Channel1_Mean, color = "Mean")) + 
+  geom_line(aes(y = Channel1_Median, color = "Median")) +
+  scale_color_manual(values = c("Mean" = "blue", "Median" = "red"), name=NULL) +
+  labs(title = "",  
+       x = "Time (s)",
+       y = "Value",
+       color = "Legend") +
+  theme_minimal()+
+theme(plot.title = element_text(hjust = 0.5), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1),
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), 
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white"))
+
+
+ggsave("../plot/mnf_1_3.png", plot = mnf, dpi = 300, width = 8, height = 6)
+
+```
+#Plot mnf, and mdf for channel 3 for Radias Deviation gesture
+```{r}
+library(ggplot2)
+
+# Filter the first 60 rows for plotting
+mnf_mdf_subset <- mnf_mdf[41:54, ]
+
+# Create the plot
+mnf<-ggplot(mnf_mdf_subset, aes(x = time)) + 
+  geom_line(aes(y = Channel3_Mean, color = "Mean")) + 
+  geom_line(aes(y = Channel3_Median, color = "Median")) +
+  scale_color_manual(values = c("Mean" = "blue", "Median" = "red"), name=NULL) +
+  labs(title = "",  
+       x = "Time (s)",
+       y = "Value",
+       color = "Legend") +
+  theme_minimal()+
+theme(plot.title = element_text(hjust = 0.5), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), 
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white"))
+
+
+ggsave("../plot/mnf_3_4.png", plot = mnf, dpi = 300, width = 8, height = 6)
+
+
+```
+#Plot mnf, and mdf for channel 1 for Radias Deviation gesture
+```{r}
+library(ggplot2)
+
+# Filter the first 60 rows for plotting
+mnf_mdf_subset <- mnf_mdf[41:54, ]
+
+# Create the plot
+mnf<-ggplot(mnf_mdf_subset, aes(x = time)) + 
+  geom_line(aes(y = Channel1_Mean, color = "Mean")) + 
+  geom_line(aes(y = Channel1_Median, color = "Median")) +
+  scale_color_manual(values = c("Mean" = "blue", "Median" = "red"), name=NULL) +
+  labs(title = "",  
+       x = "Time (s)",
+       y = "Value",
+       color = "Legend") +
+  theme_minimal()+
+theme(plot.title = element_text(hjust = 0.5), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), 
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white"))
+
+
+ggsave("../plot/mnf_4_4.png", plot = mnf, dpi = 300, width = 8, height = 6)
+
+```
+#Plot mnf, and mdf for channel 1 for Grip gesture
+```{r}
+library(ggplot2)
+
+# Filter the first 60 rows for plotting
+mnf_mdf_subset <- mnf_mdf[51:64, ]
+
+# Create the plot
+mnf<-ggplot(mnf_mdf_subset, aes(x = time)) + 
+  geom_line(aes(y = Channel1_Mean, color = "Mean")) + 
+  geom_line(aes(y = Channel1_Median, color = "Median")) +
+  scale_color_manual(values = c("Mean" = "blue", "Median" = "red"), name=NULL) +
+  labs(title = "",  
+       x = "Time (s)",
+       y = "Value",
+       color = "Legend") +
+  theme_minimal()+
+theme(plot.title = element_text(hjust = 0.5), # Center the plot title
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), 
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white"))
+
+
+ggsave("../plot/mnf_1_5.png", plot = mnf, dpi = 300, width = 8, height = 6)
+
+
+```
+#Plot mnf, and mdf for channel 2 for Grip gesture
+```{r}
+library(ggplot2)
+
+# Filter the first 60 rows for plotting
+mnf_mdf_subset <- mnf_mdf[51:64, ]
+
+# Create the plot
+mnf<-ggplot(mnf_mdf_subset, aes(x = time)) + 
+  geom_line(aes(y = Channel2_Mean, color = "Mean")) + 
+  geom_line(aes(y = Channel2_Median, color = "Median")) +
+  scale_color_manual(values = c("Mean" = "blue", "Median" = "red"), name=NULL) +
+  labs(title = "",  
+       x = "Time (s)",
+       y = "Value",
+       color = "Legend") +
+  theme_minimal()+
+theme(plot.title = element_text(hjust = 0.5), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10),
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white"))
+
+
+ggsave("../plot/mnf_2_5.png", plot = mnf, dpi = 300, width = 8, height = 6)
+
+```
+#Plot mnf, and mdf for channel 3 for Grip gesture
+```{r}
+library(ggplot2)
+
+# Filter the first 60 rows for plotting
+mnf_mdf_subset <- mnf_mdf[51:64, ]
+
+# Create the plot
+mnf<-ggplot(mnf_mdf_subset, aes(x = time)) + 
+  geom_line(aes(y = Channel3_Mean, color = "Mean")) + 
+  geom_line(aes(y = Channel3_Median, color = "Median")) +
+  scale_color_manual(values = c("Mean" = "blue", "Median" = "red"), name=NULL) +
+  labs(title = "",  
+       x = "Time (s)",
+       y = "Value",
+       color = "Legend") +
+  theme_minimal()+
+theme(plot.title = element_text(hjust = 0.5), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), 
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white"))
+
+
+ggsave("../plot/mnf_3_5.png", plot = mnf, dpi = 300, width = 8, height = 6)
+
+
+```
+#Plot mnf, and mdf for channel 4 for Grip gesture
+```{r}
+library(ggplot2)
+
+# Filter the first 60 rows for plotting
+mnf_mdf_subset <- mnf_mdf[51:64, ]
+
+# Create the plot
+mnf<-ggplot(mnf_mdf_subset, aes(x = time)) + 
+  geom_line(aes(y = Channel4_Mean, color = "Mean")) + 
+  geom_line(aes(y = Channel4_Median, color = "Median")) +
+  scale_color_manual(values = c("Mean" = "blue", "Median" = "red"), name=NULL) +
+  labs(title = "",  
+       x = "Time (s)",
+       y = "Value",
+       color = "Legend") +
+  theme_minimal()+
+theme(plot.title = element_text(hjust = 0.5), 
+        panel.border = element_rect(color = "black", fill = NA, size = 1), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), 
+        panel.grid.major = element_line(color = "lightgrey"), 
+        panel.grid.minor = element_line(color = "white"))
+
+
+ggsave("../plot/mnf_4_5.png", plot = mnf, dpi = 300, width = 8, height = 6)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
